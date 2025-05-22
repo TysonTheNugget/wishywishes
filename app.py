@@ -10,7 +10,7 @@ CORS(app)
 
 # --- Configuration ---
 HIRO_API_KEY = "1423e3815899d351c41529064e5b9a52"
-JSONBIN_API_KEY = "$2a$10$HmW4pt5hlCQopoMmmE7.pOvVwmsm4wKTpJqVRUitVUkYf4b829ye6"
+JSONBIN_API_KEY = "$2a$10$CCX5llkEdRdUdh19eH5OaOsquU8QArgAJZWERm/tYJKjXhoMFl5MG"
 JSONBIN_BIN_ID = "682fa4fc8561e97a501a18c6"
 ETCHING_NAME = "WISHYWASHYMACHINE"
 HIRO_API_HOLDERS = "https://api.hiro.so/runes/v1/etchings/{}/holders"
