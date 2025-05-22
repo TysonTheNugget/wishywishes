@@ -16,11 +16,12 @@ ETCHING_NAME = "WISHYWASHYMACHINE"
 HIRO_API_HOLDERS = "https://api.hiro.so/runes/v1/etchings/{}/holders"
 HIRO_API_ETCHING = "https://api.hiro.so/runes/v1/etchings/{}"
 HEADERS = {"x-api-key": HIRO_API_KEY}
-RATE_LIMIT_DELAY = 5  # Reduced delay for faster fetches
+RATE_LIMIT_DELAY = 3  # Faster but safe for Hiro API
 RATE_LIMIT_WAIT = 60
 MAX_RETRIES = 3
 LIMIT = 60
 REQUEST_TIMEOUT = 10
+MAX_HOLDERS = 2000  # Cap at 2000 holders
 
 def fetch_rune_metadata():
     """Fetch metadata for the rune to verify its details."""
@@ -78,12 +79,13 @@ def fetch_page(offset, limit):
                 return {"status": "error", "message": str(e)}
             time.sleep(5)
 
-def find_last_non_zero_page(total, limit):
-    """Binary search to find the last page with non-zero holders."""
-    if total == 0:
+def find_last_non_zero_page(total, limit, max_holders):
+    """Binary search to find the last page with non-zero holders within max_holders."""
+    effective_total = min(total, max_holders)
+    if effective_total == 0:
         return 0
     left = 0
-    right = total - 1
+    right = effective_total - 1
     last_non_zero_offset = 0
     while left <= right:
         mid = (left + right) // 2
@@ -103,7 +105,7 @@ def find_last_non_zero_page(total, limit):
     return last_non_zero_offset
 
 def get_all_holders():
-    """Fetch all non-zero holders and upload to JSONBin."""
+    """Fetch up to 2000 non-zero holders and upload to JSONBin."""
     holders = []
     offset = 0
     total = None
@@ -123,14 +125,14 @@ def get_all_holders():
     if total == 0:
         return {"status": "error", "message": "No holders found for this rune"}
 
-    # Find last page with non-zero holders
-    last_non_zero_offset_result = find_last_non_zero_page(total, LIMIT)
+    # Find last page with non-zero holders within MAX_HOLDERS
+    last_non_zero_offset_result = find_last_non_zero_page(total, LIMIT, MAX_HOLDERS)
     if isinstance(last_non_zero_offset_result, dict) and last_non_zero_offset_result["status"] == "error":
         return last_non_zero_offset_result
     last_non_zero_offset = last_non_zero_offset_result
 
-    # Fetch holders up to last non-zero page
-    while offset <= last_non_zero_offset:
+    # Fetch holders up to last non-zero page or MAX_HOLDERS
+    while offset <= min(last_non_zero_offset, MAX_HOLDERS - LIMIT):
         print(f"Fetching offset {offset} (page {offset // LIMIT + 1})...")
         page_result = fetch_page(offset, LIMIT)
         if page_result["status"] == "error":
