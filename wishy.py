@@ -27,17 +27,16 @@ OUTPUT_FILE = os.path.join(TEMP_DIR, "output.json")
 RAW_PAGES_FILE = os.path.join(TEMP_DIR, "raw_pages.json")
 NON_ZERO_FILE = os.path.join(TEMP_DIR, "non_zero_holders.json")
 
+BIN_ID = "682f6c2f8561e97a5019f8ad"
+JSONBIN_API_KEY = "$2a$10$Vx6nKwI8iapi.qt.PZBwxOg1/efwKsqCAbty90zUYefK5nnIpdFWK"
+
 def fetch_rune_metadata():
     url = HIRO_API_ETCHING.format(ETCHING_NAME)
     try:
-        print(f"Fetching rune metadata from {url}...")
         response = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
-        data = response.json()
-        print("Rune metadata fetched successfully.")
-        return data
+        return response.json()
     except requests.exceptions.RequestException as e:
-        print(f"Failed to fetch rune metadata: {e}")
         return {"error": str(e)}
 
 def load_progress():
@@ -100,7 +99,6 @@ def find_last_non_zero_page(total, limit):
     return last_non_zero_offset
 
 def upload_to_jsonbin(data, bin_id, api_key):
-    """Upload JSON data to a specific JSONBin bin."""
     url = f"https://api.jsonbin.io/v3/b/{bin_id}"
     headers = {
         "Content-Type": "application/json",
@@ -114,33 +112,33 @@ def upload_to_jsonbin(data, bin_id, api_key):
         print("❌ Failed to upload to JSONBin:", response.text)
 
 def get_all_holders():
-    progress = load_progress()
-    holders = progress["holders"]
-    offset = progress["offset"]
-    total = progress["total"]
-    non_zero_count = progress["non_zero_count"]
-    last_non_zero_offset = progress.get("last_non_zero_offset")
+    holders = []
+    offset = 0
+    total = None
+    non_zero_count = 0
+    last_non_zero_offset = None
     raw_debug_pages = []
     limit = LIMIT
+
     rune_metadata = fetch_rune_metadata()
     if "error" in rune_metadata:
         return rune_metadata
-    if total is None:
-        data = fetch_page(0, limit)
-        if "error" in data:
-            return data
-        total = data.get("total", 0)
-        if total == 0:
-            return {"error": "No holders found"}
-    if last_non_zero_offset is None:
-        result = find_last_non_zero_page(total, limit)
-        if isinstance(result, dict) and "error" in result:
-            return result
-        last_non_zero_offset = result
+
+    data = fetch_page(0, limit)
+    if "error" in data:
+        return data
+    total = data.get("total", 0)
+    if total == 0:
+        return {"error": "No holders found"}
+
+    result = find_last_non_zero_page(total, limit)
+    if isinstance(result, dict) and "error" in result:
+        return result
+    last_non_zero_offset = result
+
     while offset <= last_non_zero_offset:
         data = fetch_page(offset, limit)
         if "error" in data:
-            save_progress(holders, offset, total, non_zero_count, last_non_zero_offset)
             return data
         results = data.get("results", [])
         if not results:
@@ -152,21 +150,14 @@ def get_all_holders():
         if page_non_zero == 0:
             break
         offset += limit
-        save_progress(holders, offset, total, non_zero_count, last_non_zero_offset)
         time.sleep(RATE_LIMIT_DELAY)
-    with open(OUTPUT_FILE, "w") as f:
-        json.dump(holders, f, indent=2)
-    with open(RAW_PAGES_FILE, "w") as f:
-        json.dump(raw_debug_pages, f, indent=2)
+
     non_zero_holders = [h for h in holders if int(h.get("balance", 0)) > 0]
     with open(NON_ZERO_FILE, "w") as f:
         json.dump(non_zero_holders, f, indent=2)
-    # ✅ UPLOAD TO JSONBIN HERE
-    upload_to_jsonbin(
-        non_zero_holders,
-        bin_id="682f6c2f8561e97a5019f8ad",        # Replace with your real bin ID
-        api_key="$2a$10$Vx6nKwI8iapi.qt.PZBwxOg1/efwKsqCAbty90zUYefK5nnIpdFWK"
-    )
+
+    upload_to_jsonbin(non_zero_holders, BIN_ID, JSONBIN_API_KEY)
+
     return {"holders": holders, "non_zero_holders": non_zero_holders, "total": total}
 
 @app.route("/check_holder_rank", methods=["POST"])
@@ -178,7 +169,7 @@ def check_holder_rank():
     try:
         with open(NON_ZERO_FILE, "r") as f:
             non_zero_holders = json.load(f)
-    except Exception as e:
+    except Exception:
         return jsonify({"error": "Could not load ranking data."}), 500
     for index, holder in enumerate(non_zero_holders, start=1):
         if holder.get("address") == user_address:
@@ -190,7 +181,6 @@ def check_holder_rank():
             })
     return jsonify({"error": "Critical error code 404: No wishy found"}), 404
 
-# ✅ New route for cron job to trigger every 13 min
 @app.route("/update_holders", methods=["GET"])
 def update_holders():
     result = get_all_holders()
