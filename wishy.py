@@ -7,7 +7,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS to allow frontend requests
+CORS(app, resources={r"/check_holder_rank": {"origins": "*"}})  # Allow all origins for testing
 
 # --- Configuration ---
 API_KEY = "1423e3815899d351c41529064e5b9a52"
@@ -15,17 +15,18 @@ ETCHING_NAME = "WISHYWASHYMACHINE"
 HIRO_API_HOLDERS = "https://api.hiro.so/runes/v1/etchings/{}/holders"
 HIRO_API_ETCHING = "https://api.hiro.so/runes/v1/etchings/{}"
 HEADERS = {"x-api-key": API_KEY}
-RATE_LIMIT_DELAY = 10  # Delay between requests
+RATE_LIMIT_DELAY = 1  # Reduced delay between requests
 RATE_LIMIT_WAIT = 60  # Wait after 429 error
 MAX_RETRIES = 3
 PROGRESS_FILE = "progress.json"
+LIMIT = 60  # API limit per page
 
 
 def fetch_rune_metadata():
     """Fetch metadata for the rune to verify its details."""
     url = HIRO_API_ETCHING.format(ETCHING_NAME)
     try:
-        response = requests.get(url, headers=HEADERS)
+        response = requests.get(url, headers=HEADERS, timeout=10)
         response.raise_for_status()
         data = response.json()
         with open("rune_metadata.json", "w") as f:
@@ -40,14 +41,79 @@ def load_progress():
     if os.path.exists(PROGRESS_FILE):
         with open(PROGRESS_FILE, "r") as f:
             return json.load(f)
-    return {"holders": [], "offset": 0, "total": None, "non_zero_count": 0}
+    return {"holders": [], "offset": 0, "total": None, "non_zero_count": 0, "last_non_zero_offset": None}
 
 
-def save_progress(holders, offset, total, non_zero_count):
+def save_progress(holders, offset, total, non_zero_count, last_non_zero_offset):
     """Save fetching progress to file."""
-    progress = {"holders": holders, "offset": offset, "total": total, "non_zero_count": non_zero_count}
+    progress = {
+        "holders": holders,
+        "offset": offset,
+        "total": total,
+        "non_zero_count": non_zero_count,
+        "last_non_zero_offset": last_non_zero_offset
+    }
     with open(PROGRESS_FILE, "w") as f:
         json.dump(progress, f, indent=2)
+
+
+def fetch_page(offset, limit):
+    """Fetch a single page of holders from the API."""
+    url = HIRO_API_HOLDERS.format(ETCHING_NAME)
+    params = {"offset": offset, "limit": limit}
+    for attempt in range(MAX_RETRIES):
+        try:
+            response = requests.get(url, headers=HEADERS, params=params, timeout=10)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.HTTPError as e:
+            print(f"HTTP error (attempt {attempt + 1}/{MAX_RETRIES}): {e}")
+            if response.status_code == 429:
+                print(f"Rate limit hit, waiting {RATE_LIMIT_WAIT} seconds...")
+                time.sleep(RATE_LIMIT_WAIT)
+            elif attempt == MAX_RETRIES - 1:
+                return {"error": f"Failed after retries: {str(e)}"}
+            time.sleep(5)
+        except requests.exceptions.RequestException as e:
+            print(f"API request failed (attempt {attempt + 1}/{MAX_RETRIES}): {e}")
+            if attempt == MAX_RETRIES - 1:
+                return {"error": f"Failed to fetch data: {str(e)}"}
+            time.sleep(5)
+    return {"error": "Max retries exceeded"}
+
+
+def find_last_non_zero_page(total, limit):
+    """Use binary search to find the last page with non-zero balance holders."""
+    if total == 0:
+        return 0
+
+    left = 0
+    right = total - 1
+    last_non_zero_offset = 0
+
+    while left <= right:
+        mid = (left + right) // 2
+        mid = (mid // limit) * limit  # Align to the nearest page boundary
+        print(f"Binary search: Checking offset {mid}...")
+
+        data = fetch_page(mid, limit)
+        if "error" in data:
+            return {"error": data["error"]}
+
+        results = data.get("results", [])
+        page_non_zero = sum(1 for holder in results if int(holder.get("balance", 0)) > 0)
+
+        if page_non_zero > 0:
+            # Found non-zero holders, look for more on the right
+            last_non_zero_offset = mid
+            left = mid + limit
+        else:
+            # No non-zero holders, look on the left
+            right = mid - limit
+
+        time.sleep(RATE_LIMIT_DELAY)  # Avoid rate limiting during binary search
+
+    return last_non_zero_offset
 
 
 def get_all_holders():
@@ -57,53 +123,41 @@ def get_all_holders():
     offset = progress["offset"]
     total = progress["total"]
     non_zero_count = progress["non_zero_count"]
+    last_non_zero_offset = progress.get("last_non_zero_offset")
 
     raw_debug_pages = []
-    limit = 60
+    limit = LIMIT
 
     # Fetch rune metadata for verification
     rune_metadata = fetch_rune_metadata()
     if "error" in rune_metadata:
         return rune_metadata
 
-    while True:
+    # Get total if not already known
+    if total is None:
+        data = fetch_page(0, limit)
+        if "error" in data:
+            return data
+        total = data.get("total", 0)
+        print(f"Total holders reported by API: {total}")
+        if total == 0:
+            return {"error": "No holders found for this rune"}
+
+    # Find the last offset with non-zero balance holders if not already known
+    if last_non_zero_offset is None:
+        result = find_last_non_zero_page(total, limit)
+        if "error" in result:
+            return result
+        last_non_zero_offset = result
+        print(f"Last non-zero offset found: {last_non_zero_offset}")
+
+    # Fetch all pages up to the last non-zero offset, starting from the saved offset
+    while offset <= last_non_zero_offset:
         print(f"Fetching offset {offset} (page {offset // limit + 1})...")
-        url = HIRO_API_HOLDERS.format(ETCHING_NAME)
-        params = {"offset": offset, "limit": limit}
-        
-        for attempt in range(MAX_RETRIES):
-            try:
-                response = requests.get(url, headers=HEADERS, params=params)
-                response.raise_for_status()
-                break
-            except requests.exceptions.HTTPError as e:
-                print(f"HTTP error (attempt {attempt + 1}/{MAX_RETRIES}): {e}")
-                if response.status_code == 429:
-                    print(f"Rate limit hit, waiting {RATE_LIMIT_WAIT} seconds...")
-                    time.sleep(RATE_LIMIT_WAIT)
-                elif attempt == MAX_RETRIES - 1:
-                    save_progress(holders, offset, total, non_zero_count)
-                    return {"error": f"Failed after retries: {str(e)}"}
-                time.sleep(5)
-            except requests.exceptions.RequestException as e:
-                print(f"API request failed (attempt {attempt + 1}/{MAX_RETRIES}): {e}")
-                if attempt == MAX_RETRIES - 1:
-                    save_progress(holders, offset, total, non_zero_count)
-                    return {"error": f"Failed to fetch data: {str(e)}"}
-                time.sleep(5)
-
-        try:
-            data = response.json()
-        except json.JSONDecodeError:
-            print(f"Failed to parse JSON response. Response content: {response.text}")
-            save_progress(holders, offset, total, non_zero_count)
-            return {"error": "Invalid JSON response from API"}
-
-        if total is None:
-            total = data.get("total", 0)
-            print(f"Total holders reported by API: {total}")
-            if total == 0:
-                return {"error": "No holders found for this rune"}
+        data = fetch_page(offset, limit)
+        if "error" in data:
+            save_progress(holders, offset, total, non_zero_count, last_non_zero_offset)
+            return data
 
         results = data.get("results", [])
         if not results:
@@ -126,11 +180,7 @@ def get_all_holders():
             break
 
         offset += limit
-        if offset >= total:
-            break
-
-        # Save progress after each page
-        save_progress(holders, offset, total, non_zero_count)
+        save_progress(holders, offset, total, non_zero_count, last_non_zero_offset)
         time.sleep(RATE_LIMIT_DELAY)
 
     # Save full holder list
@@ -164,10 +214,8 @@ def check_holder_rank():
     if "error" in result:
         return jsonify({"error": result["error"]}), 500
 
-    holders = result["holders"]
     non_zero_holders = result["non_zero_holders"]
 
-    found = False
     for index, holder in enumerate(non_zero_holders, start=1):
         if holder.get("address") == user_address:
             balance = int(holder.get("balance", 0))
@@ -176,7 +224,6 @@ def check_holder_rank():
                 "balance": balance,
                 "non_zero_holders": len(non_zero_holders)
             })
-        found = True
 
     return jsonify({"error": "Critical error code 404: No wishy found"}), 404
 
