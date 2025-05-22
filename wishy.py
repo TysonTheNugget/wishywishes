@@ -27,7 +27,6 @@ OUTPUT_FILE = os.path.join(TEMP_DIR, "output.json")
 RAW_PAGES_FILE = os.path.join(TEMP_DIR, "raw_pages.json")
 NON_ZERO_FILE = os.path.join(TEMP_DIR, "non_zero_holders.json")
 
-
 def fetch_rune_metadata():
     url = HIRO_API_ETCHING.format(ETCHING_NAME)
     try:
@@ -41,13 +40,11 @@ def fetch_rune_metadata():
         print(f"Failed to fetch rune metadata: {e}")
         return {"error": str(e)}
 
-
 def load_progress():
     if os.path.exists(PROGRESS_FILE):
         with open(PROGRESS_FILE, "r") as f:
             return json.load(f)
     return {"holders": [], "offset": 0, "total": None, "non_zero_count": 0, "last_non_zero_offset": None}
-
 
 def save_progress(holders, offset, total, non_zero_count, last_non_zero_offset):
     progress = {
@@ -59,7 +56,6 @@ def save_progress(holders, offset, total, non_zero_count, last_non_zero_offset):
     }
     with open(PROGRESS_FILE, "w") as f:
         json.dump(progress, f, indent=2)
-
 
 def fetch_page(offset, limit):
     url = HIRO_API_HOLDERS.format(ETCHING_NAME)
@@ -80,7 +76,6 @@ def fetch_page(offset, limit):
                 return {"error": str(e)}
             time.sleep(5)
     return {"error": "Max retries exceeded"}
-
 
 def find_last_non_zero_page(total, limit):
     if total == 0:
@@ -104,6 +99,19 @@ def find_last_non_zero_page(total, limit):
         time.sleep(RATE_LIMIT_DELAY)
     return last_non_zero_offset
 
+def upload_to_jsonbin(data, bin_id, api_key):
+    """Upload JSON data to a specific JSONBin bin."""
+    url = f"https://api.jsonbin.io/v3/b/{bin_id}"
+    headers = {
+        "Content-Type": "application/json",
+        "X-Master-Key": api_key,
+        "X-Bin-Versioning": "false"
+    }
+    response = requests.put(url, headers=headers, json=data)
+    if response.status_code == 200:
+        print("✅ JSON uploaded to JSONBin successfully.")
+    else:
+        print("❌ Failed to upload to JSONBin:", response.text)
 
 def get_all_holders():
     progress = load_progress()
@@ -153,8 +161,13 @@ def get_all_holders():
     non_zero_holders = [h for h in holders if int(h.get("balance", 0)) > 0]
     with open(NON_ZERO_FILE, "w") as f:
         json.dump(non_zero_holders, f, indent=2)
+    # ✅ UPLOAD TO JSONBIN HERE
+    upload_to_jsonbin(
+        non_zero_holders,
+        bin_id="YOUR_BIN_ID_HERE",        # Replace with your real bin ID
+        api_key="$2a$10$Vx6nKwI8iapi.qt.PZBwxOg1/efwKsqCAbty90zUYefK5nnIpdFWK"
+    )
     return {"holders": holders, "non_zero_holders": non_zero_holders, "total": total}
-
 
 @app.route("/check_holder_rank", methods=["POST"])
 def check_holder_rank():
@@ -177,13 +190,11 @@ def check_holder_rank():
             })
     return jsonify({"error": "Critical error code 404: No wishy found"}), 404
 
-
 # ✅ New route for cron job to trigger every 13 min
 @app.route("/update_holders", methods=["GET"])
 def update_holders():
     result = get_all_holders()
     return jsonify({"status": "ok" if "error" not in result else "error", "details": result})
-
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
