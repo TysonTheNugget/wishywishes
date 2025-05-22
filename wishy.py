@@ -194,7 +194,9 @@ def check_holder_rank():
 @app.route("/update_holders", methods=["GET"])
 def update_holders():
     result = get_all_holders()
-    return jsonify({"status": "ok" if "error" not in result else "error", "details": result})
+    if "error" in result:
+        return jsonify({"status": "error", "message": result["error"]}), 500
+    return jsonify({"status": "ok", "message": "Holders updated and pushed to JSONBin."})
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
