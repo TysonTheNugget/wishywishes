@@ -27,7 +27,7 @@ OUTPUT_FILE = os.path.join(TEMP_DIR, "output.json")
 RAW_PAGES_FILE = os.path.join(TEMP_DIR, "raw_pages.json")
 NON_ZERO_FILE = os.path.join(TEMP_DIR, "non_zero_holders.json")
 
-BIN_ID = "682f6c2f8561e97a5019f8ad"
+BIN_ID = "682fa4fc8561e97a501a18c6"
 JSONBIN_API_KEY = "$2a$10$Vx6nKwI8iapi.qt.PZBwxOg1/efwKsqCAbty90zUYefK5nnIpdFWK"
 
 def log(msg):
