@@ -164,7 +164,7 @@ def get_all_holders():
     # ✅ UPLOAD TO JSONBIN HERE
     upload_to_jsonbin(
         non_zero_holders,
-        bin_id="YOUR_BIN_ID_HERE",        # Replace with your real bin ID
+        bin_id="682f6c2f8561e97a5019f8ad",        # Replace with your real bin ID
         api_key="$2a$10$Vx6nKwI8iapi.qt.PZBwxOg1/efwKsqCAbty90zUYefK5nnIpdFWK"
     )
     return {"holders": holders, "non_zero_holders": non_zero_holders, "total": total}
