@@ -146,7 +146,7 @@ def get_all_holders():
     # Find the last offset with non-zero balance holders if not already known
     if last_non_zero_offset is None:
         result = find_last_non_zero_page(total, limit)
-        if "error" in result:
+        if isinstance(result, dict) and "error" in result:  # Check if result is a dict before checking for "error"
             return result
         last_non_zero_offset = result
         print(f"Last non-zero offset found: {last_non_zero_offset}")
