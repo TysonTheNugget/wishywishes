@@ -188,5 +188,5 @@ def update_holders():
         return jsonify({"status": "error", "message": result["error"]}), 500
     return jsonify({"status": "ok", "message": "Holders updated and pushed to JSONBin."})
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+port = int(os.environ.get("PORT", 10000))  # 👈 This is what Render detects
+app.run(host="0.0.0.0", port=port)
