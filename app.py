@@ -10,8 +10,15 @@ from threading import Thread
 app = Flask(__name__)
 CORS(app)
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Configure logging to file
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('app.log'),  # Log to file
+        logging.StreamHandler()  # Minimal console output
+    ]
+)
 logger = logging.getLogger(__name__)
 
 # In-memory cache for task status
@@ -19,9 +26,10 @@ task_status = {"status": "idle", "result": None}
 
 # --- Configuration ---
 HIRO_API_KEY = "1423e3815899d351c41529064e5b9a52"
-JSONBIN_API_KEY = "$2a$10$CCX5llkEdRdUdh19eH5OaOsquU8QArgAJZWERm/tYJKjXhoMFl5MG"
-JSONBIN_BIN_ID_1 = "682fa4fc8561e97a501a18c6"  # First chunk
-JSONBIN_BIN_ID_2 = "682fb6288960c979a59fbca6 "  # Second chunk, replace with new bin ID
+JSONBIN_API_KEY = "$2a$10$HmW4pt5hlCQopoMmmE7.pOvVwmsm4wKTpJqVRUitVUkYf4b829ye6"
+JSONBIN_BIN_ID_1 = "682fa4fc8561e97a501a18c6"
+JSONBIN_BIN_ID_2 = "<your_second_bin_id>"  # Replace
+JSONBIN_BIN_ID_3 = "<your_third_bin_id>"  # Replace
 ETCHING_NAME = "WISHYWASHYMACHINE"
 HIRO_API_HOLDERS = "https://api.hiro.so/runes/v1/etchings/{}/holders"
 HIRO_API_ETCHING = "https://api.hiro.so/runes/v1/etchings/{}"
@@ -32,7 +40,7 @@ MAX_RETRIES = 3
 LIMIT = 60
 REQUEST_TIMEOUT = 10
 MAX_HOLDERS = 2000
-CHUNK_SIZE = 780  # ~780 holders per chunk (~47-75KB)
+CHUNK_SIZE = 520
 
 def fetch_rune_metadata():
     """Fetch metadata for the rune."""
@@ -42,14 +50,14 @@ def fetch_rune_metadata():
         response = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
         data = response.json()
-        logger.info(f"Rune Metadata: {json.dumps(data, indent=2)}")
+        logger.debug(f"Rune Metadata: {json.dumps(data, indent=2)}")  # Debug to file
         return {"status": "success", "data": data}
     except requests.exceptions.RequestException as e:
         logger.error(f"Failed to fetch rune metadata: {e}")
         return {"status": "error", "message": str(e)}
 
 def upload_to_jsonbin(data, bin_id):
-    """Upload JSON data to a specific JSONBin bin."""
+    """Upload JSON data to a JSONBin bin."""
     url = f"https://api.jsonbin.io/v3/b/{bin_id}"
     headers = {
         "Content-Type": "application/json",
@@ -60,10 +68,10 @@ def upload_to_jsonbin(data, bin_id):
         logger.info(f"Uploading {len(data)} holders to JSONBin bin {bin_id}")
         response = requests.put(url, headers=headers, json=data, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
-        logger.info(f"✅ JSON uploaded to JSONBin bin {bin_id} successfully")
+        logger.info(f"JSON uploaded to bin {bin_id}")
         return {"status": "success", "message": f"Data uploaded to bin {bin_id}"}
     except requests.exceptions.RequestException as e:
-        error_message = f"❌ Failed to upload to JSONBin bin {bin_id}: {e}\nResponse: {response.text if 'response' in locals() else 'No response'}"
+        error_message = f"Failed to upload to bin {bin_id}: {e}"
         logger.error(error_message)
         return {"status": "error", "message": error_message}
 
@@ -73,7 +81,7 @@ def fetch_page(offset, limit):
     params = {"offset": offset, "limit": limit}
     for attempt in range(MAX_RETRIES):
         try:
-            logger.info(f"Fetching page at offset {offset}")
+            logger.debug(f"Fetching page at offset {offset}")  # Debug to file
             response = requests.get(url, headers=HEADERS, params=params, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
             return {"status": "success", "data": response.json()}
@@ -114,74 +122,64 @@ def fetch_holders_task():
                 return
             results = page_result["data"].get("results", [])
             if not results:
-                logger.info("No more results returned")
+                logger.info("No more results")
                 break
             holders.extend(results)
             page_non_zero = sum(1 for holder in results if int(holder.get("balance", 0)) > 0)
             non_zero_count += page_non_zero
-            logger.info(f"Fetched {len(results)} holders in this page. Total so far: {len(holders)}")
-            logger.info(f"Non-zero balance holders in this page: {page_non_zero}. Total non-zero: {non_zero_count}")
+            logger.debug(f"Fetched {len(results)} holders. Total: {len(holders)}, Non-zero: {non_zero_count}")
             if page_non_zero == 0:
-                logger.info("Encountered a full page of zero-balance holders. Stopping fetch.")
+                logger.info("Stopped at zero-balance holders")
                 break
             offset += LIMIT
             if offset >= MAX_HOLDERS:
-                logger.info("Reached MAX_HOLDERS limit")
+                logger.info("Reached MAX_HOLDERS")
                 break
             time.sleep(RATE_LIMIT_DELAY)
 
         # Filter non-zero holders
         non_zero_holders = [holder for holder in holders if int(holder.get("balance", 0)) > 0]
-        logger.info(f"✅ Total holders fetched: {len(holders)}")
-        logger.info(f"Total non-zero holders: {len(non_zero_holders)}")
+        logger.info(f"Total holders: {len(holders)}, Non-zero: {len(non_zero_holders)}")
 
-        # Split into chunks
+        # Split into three chunks
         chunk_1 = non_zero_holders[:CHUNK_SIZE]
-        chunk_2 = non_zero_holders[CHUNK_SIZE:]
+        chunk_2 = non_zero_holders[CHUNK_SIZE:2*CHUNK_SIZE]
+        chunk_3 = non_zero_holders[2*CHUNK_SIZE:]
         upload_results = []
 
-        # Upload first chunk
-        if chunk_1:
-            result_1 = upload_to_jsonbin(chunk_1, JSONBIN_BIN_ID_1)
-            upload_results.append({"bin_id": JSONBIN_BIN_ID_1, "result": result_1})
-            if result_1["status"] == "error":
-                task_status = {"status": "error", "result": upload_results}
-                return
-        else:
-            upload_results.append({"bin_id": JSONBIN_BIN_ID_1, "result": {"status": "skipped", "message": "No data for first chunk"}})
-
-        # Upload second chunk
-        if chunk_2:
-            result_2 = upload_to_jsonbin(chunk_2, JSONBIN_BIN_ID_2)
-            upload_results.append({"bin_id": JSONBIN_BIN_ID_2, "result": result_2})
-            if result_2["status"] == "error":
-                task_status = {"status": "error", "result": upload_results}
-                return
-        else:
-            upload_results.append({"bin_id": JSONBIN_BIN_ID_2, "result": {"status": "skipped", "message": "No data for second chunk"}})
+        # Upload chunks
+        for chunk, bin_id in [(chunk_1, JSONBIN_BIN_ID_1), (chunk_2, JSONBIN_BIN_ID_2), (chunk_3, JSONBIN_BIN_ID_3)]:
+            if chunk:
+                result = upload_to_jsonbin(chunk, bin_id)
+                upload_results.append({"bin_id": bin_id, "result": result, "count": len(chunk)})
+                if result["status"] == "error":
+                    task_status = {"status": "error", "result": upload_results}
+                    return
+            else:
+                upload_results.append({"bin_id": bin_id, "result": {"status": "skipped", "message": f"No data for bin {bin_id}"}, "count": 0})
 
         task_status = {
             "status": "success",
             "result": {
                 "holders_count": len(holders),
                 "non_zero_holders_count": len(non_zero_holders),
-                "chunk_1_count": len(chunk_1),
-                "chunk_2_count": len(chunk_2),
+                "chunk_counts": [len(chunk_1), len(chunk_2), len(chunk_3)],
                 "upload_results": upload_results
             }
         }
     except Exception as e:
-        logger.error(f"Unexpected error in fetch_holders_task: {e}", exc_info=True)
+        logger.error(f"Unexpected error: {e}", exc_info=True)
         task_status = {"status": "error", "result": {"message": f"Unexpected error: {e}"}}
 
 @app.route("/update_holders", methods=["GET"])
 def update_holders():
     """Start holder fetch in background."""
+    print("Starting holder fetch")  # Minimal console output
     logger.info("Received request to /update_holders")
     if task_status["status"] == "running":
-        return jsonify({"status": "running", "message": "Fetch already in progress"})
+        return jsonify({"status": "running", "message": "Fetch in progress"})
     Thread(target=fetch_holders_task).start()
-    return jsonify({"status": "started", "message": "Fetch started in background"})
+    return jsonify({"status": "started", "message": "Fetch started"})
 
 @app.route("/status", methods=["GET"])
 def status():
