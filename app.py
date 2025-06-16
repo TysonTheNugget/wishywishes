@@ -26,10 +26,10 @@ task_status = {"status": "idle", "result": None}
 
 # --- Configuration ---
 HIRO_API_KEY = "1423e3815899d351c41529064e5b9a52"
-JSONBIN_API_KEY = "$2a$10$CCX5llkEdRdUdh19eH5OaOsquU8QArgAJZWERm/tYJKjXhoMFl5MG"
-JSONBIN_BIN_ID_1 = "682fa4fc8561e97a501a18c6"
-JSONBIN_BIN_ID_2 = "6830051d8561e97a501a497a"  # Replace
-JSONBIN_BIN_ID_3 = "682fb6288960c979a59fbca6"  # Replace
+JSONBIN_API_KEY = "$2a$10$enXFuorMjZo.BrAOmdQSiOX52uDiXOp0ibKb.pyQ7SN9g6vbhOqBi"
+JSONBIN_BIN_ID_1 = "684f90028561e97a5024f8c1"
+JSONBIN_BIN_ID_2 = "684f8ff68561e97a5024f8bd"  # Replace
+JSONBIN_BIN_ID_3 = "684f8fef8561e97a5024f8ba"  # Replace
 ETCHING_NAME = "WISHYWASHYMACHINE"
 HIRO_API_HOLDERS = "https://api.hiro.so/runes/v1/etchings/{}/holders"
 HIRO_API_ETCHING = "https://api.hiro.so/runes/v1/etchings/{}"
